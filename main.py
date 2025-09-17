@@ -1,5 +1,6 @@
-# === Triple Confirmation Signal Bot ===
-# Requirements: pip install yfinance ta pandas requests
+# === Triple Confirmation Signal Bot + Flask Web Stub ===
+# Requirements:
+# pip install yfinance ta pandas requests flask pytz
 
 import yfinance as yf
 import pandas as pd
@@ -8,6 +9,9 @@ import requests
 from datetime import datetime
 import pytz
 import time
+import threading
+import os
+from flask import Flask
 
 # === Config ===
 PAIR = 'EURUSD=X'  # yfinance format
@@ -16,23 +20,26 @@ LOOKBACK = 100
 RSI_PERIOD = 14
 EMA_FAST = 5
 EMA_SLOW = 20
-BOT_TOKEN = '8405596682:AAHFDmGX_4hfk5_qIXudfJXC2wK9EpdtnxQ'
-CHAT_ID = '7195026649'
+BOT_TOKEN = '8405596682:AAHFDmGX_4hfk5_qIXudfJXC2wK9EpdtnxQ'   # <-- замени на свой
+CHAT_ID = '7195026649'        # <-- замени на свой
 TIMEZONE = 'America/Sao_Paulo'  # UTC-3
 
-# === Function: Send Message to Telegram ===
+# === Telegram ===
 def send_telegram_signal(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {'chat_id': CHAT_ID, 'text': message}
     try:
         r = requests.post(url, data=payload)
-        print("Signal sent!")
+        if r.status_code == 200:
+            print("Signal sent!")
+        else:
+            print("Telegram error:", r.text)
     except Exception as e:
         print("Error sending message:", e)
 
-# === Function: Check Signal ===
+# === Signal Logic ===
 def check_signal():
-    data = yf.download(PAIR, interval=INTERVAL, period='1d')
+    data = yf.download(PAIR, interval=INTERVAL, period='1d', auto_adjust=False)
     if len(data) < EMA_SLOW:
         print("Not enough data")
         return
@@ -64,17 +71,39 @@ def check_signal():
     ):
         send_signal('SELL', last)
 
-# === Format and Send Signal ===
 def send_signal(direction, data):
     now = datetime.now(pytz.timezone(TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-    msg = f"✨ {direction} SIGNAL - EUR/USD\nTime: {now} (UTC-3)\nRSI: {data['rsi']:.2f}\nEMA: {'Bullish' if direction == 'BUY' else 'Bearish'}\nMACD: {'Green Bars' if direction == 'BUY' else 'Red Bars'}"
+    msg = (
+        f"✨ {direction} SIGNAL - EUR/USD\n"
+        f"Time: {now} (UTC-3)\n"
+        f"RSI: {data['rsi']:.2f}\n"
+        f"EMA: {'Bullish' if direction == 'BUY' else 'Bearish'}\n"
+        f"MACD: {'Green Bars' if direction == 'BUY' else 'Red Bars'}"
+    )
     send_telegram_signal(msg)
 
-# === Run Forever ===
-print("\nSignal bot started...")
-while True:
-    try:
-        check_signal()
-    except Exception as err:
-        print("Error in loop:", err)
-    time.sleep(60)  # Check every 1 minute
+# === Bot Loop ===
+def run_bot():
+    print("\nSignal bot started...")
+    while True:
+        try:
+            check_signal()
+        except Exception as err:
+            print("Error in loop:", err)
+        time.sleep(60)  # check every minute
+
+# === Flask Web Server (stub for Render) ===
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "✅ Bot is running!"
+
+if __name__ == "__main__":
+    # запускаем бота в отдельном потоке
+    t = threading.Thread(target=run_bot, daemon=True)
+    t.start()
+
+    # запускаем Flask на $PORT (Render требует слушать порт)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
