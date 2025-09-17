@@ -31,11 +31,11 @@ def send_telegram_signal(message):
     try:
         r = requests.post(url, data=payload)
         if r.status_code == 200:
-            print("Signal sent!")
+            print("✅ Signal sent to Telegram!")
         else:
-            print("Telegram error:", r.text)
+            print(f"❌ Telegram error {r.status_code}: {r.text}")
     except Exception as e:
-        print("Error sending message:", e)
+        print("⚠️ Error sending message:", e)
 
 # === Signal Logic ===
 def check_signal():
@@ -84,12 +84,12 @@ def send_signal(direction, data):
 
 # === Bot Loop ===
 def run_bot():
-    print("\nSignal bot started...")
+    print("\n📡 Signal bot started...")
     while True:
         try:
             check_signal()
         except Exception as err:
-            print("Error in loop:", err)
+            print("⚠️ Error in loop:", err)
         time.sleep(60)  # check every minute
 
 # === Flask Web Server (stub for Render) ===
@@ -100,6 +100,9 @@ def index():
     return "✅ Bot is running!"
 
 if __name__ == "__main__":
+    # тестовое сообщение при старте
+    send_telegram_signal("🚀 Bot started successfully and is online!")
+
     # запускаем бота в отдельном потоке
     t = threading.Thread(target=run_bot, daemon=True)
     t.start()
