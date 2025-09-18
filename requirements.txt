@@ -1,6 +1,6 @@
 yfinance
-ta
 pandas
+ta
 requests
 flask
-pytz
+python-telegram-bot==20.7
