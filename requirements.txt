@@ -1,7 +1,8 @@
-yfinance==0.2.66
-pandas==2.3.2
-ta==0.11.0
+yfinance
+pandas
+ta
+requests
+flask
 python-telegram-bot==20.7
-flask==3.1.2
-pytz==2025.2
+imghdr-py
 
