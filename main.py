@@ -1,7 +1,4 @@
-# === Triple Confirmation Signal Bot + Flask Web Stub ===
-# Requirements:
-# pip install yfinance ta pandas requests flask pytz
-
+# === Multi-Pair Signal Bot (every 2-3 minutes) + Flask Stub ===
 import yfinance as yf
 import pandas as pd
 import ta
@@ -11,18 +8,24 @@ import pytz
 import time
 import threading
 import os
+import random
 from flask import Flask
 
 # === Config ===
-PAIR = 'EURUSD=X'  # yfinance format
-INTERVAL = '1m'    # 1-minute candles
-LOOKBACK = 100
+PAIRS = {
+    "EUR/USD": "EURUSD=X",
+    "GBP/USD": "GBPUSD=X",
+    "USD/JPY": "JPY=X"
+}
+
+INTERVAL = '1m'
+LOOKBACK = 50
 RSI_PERIOD = 14
 EMA_FAST = 5
 EMA_SLOW = 20
 BOT_TOKEN = '8405596682:AAHFDmGX_4hfk5_qIXudfJXC2wK9EpdtnxQ'   # <-- замени на свой
-CHAT_ID = '7195026649'        # <-- замени на свой
-TIMEZONE = 'America/Sao_Paulo'  # UTC-3
+CHAT_ID = '-1002902970702'        # <-- замени на свой
+TIMEZONE = 'America/Sao_Paulo'
 
 # === Telegram ===
 def send_telegram_signal(message):
@@ -38,10 +41,10 @@ def send_telegram_signal(message):
         print("⚠️ Error sending message:", e)
 
 # === Signal Logic ===
-def check_signal():
-    data = yf.download(PAIR, interval=INTERVAL, period='1d', auto_adjust=False)
+def check_signal(pair_name, pair_code):
+    data = yf.download(pair_code, interval=INTERVAL, period='1d', auto_adjust=False)
     if len(data) < EMA_SLOW:
-        print("Not enough data")
+        print(f"Not enough data for {pair_name}")
         return
 
     df = data.tail(LOOKBACK).copy()
@@ -53,60 +56,50 @@ def check_signal():
     df['macd_signal'] = macd.macd_signal()
 
     last = df.iloc[-1]
-    prev = df.iloc[-2]
 
-    # === BUY Signal ===
-    if (
-        last['rsi'] < 30 and
-        prev['ema_fast'] < prev['ema_slow'] and last['ema_fast'] > last['ema_slow'] and
-        last['macd'] > last['macd_signal']
-    ):
-        send_signal('BUY', last)
+    # Простая логика: направление по EMA
+    direction = "BUY" if last['ema_fast'] > last['ema_slow'] else "SELL"
 
-    # === SELL Signal ===
-    elif (
-        last['rsi'] > 70 and
-        prev['ema_fast'] > prev['ema_slow'] and last['ema_fast'] < last['ema_slow'] and
-        last['macd'] < last['macd_signal']
-    ):
-        send_signal('SELL', last)
+    send_signal(pair_name, direction, last)
 
-def send_signal(direction, data):
+def send_signal(pair_name, direction, data):
     now = datetime.now(pytz.timezone(TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
     msg = (
-        f"✨ {direction} SIGNAL - EUR/USD\n"
+        f"✨ {direction} SIGNAL - {pair_name}\n"
         f"Time: {now} (UTC-3)\n"
         f"RSI: {data['rsi']:.2f}\n"
         f"EMA: {'Bullish' if direction == 'BUY' else 'Bearish'}\n"
-        f"MACD: {'Green Bars' if direction == 'BUY' else 'Red Bars'}"
+        f"MACD: {data['macd']:.4f} vs {data['macd_signal']:.4f}"
     )
     send_telegram_signal(msg)
 
 # === Bot Loop ===
 def run_bot():
-    print("\n📡 Signal bot started...")
+    print("\n📡 Multi-pair signal bot started (2–3 min mode)...")
     while True:
         try:
-            check_signal()
+            for pair_name, pair_code in PAIRS.items():
+                check_signal(pair_name, pair_code)
         except Exception as err:
             print("⚠️ Error in loop:", err)
-        time.sleep(60)  # check every minute
 
-# === Flask Web Server (stub for Render) ===
+        # Случайный интервал 2–3 минуты
+        delay = random.randint(120, 180)
+        print(f"⏳ Waiting {delay} seconds before next cycle...\n")
+        time.sleep(delay)
+
+# === Flask Stub ===
 app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "✅ Bot is running!"
+    return "✅ Multi-pair Bot is running!"
 
 if __name__ == "__main__":
-    # тестовое сообщение при старте
-    send_telegram_signal("🚀 Bot started successfully and is online!")
+    send_telegram_signal("🚀 Multi-pair bot started! Signals every 2–3 minutes.")
 
-    # запускаем бота в отдельном потоке
     t = threading.Thread(target=run_bot, daemon=True)
     t.start()
 
-    # запускаем Flask на $PORT (Render требует слушать порт)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
