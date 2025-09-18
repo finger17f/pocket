@@ -1,105 +1,152 @@
-# === Multi-Pair Signal Bot (every 2-3 minutes) + Flask Stub ===
-import yfinance as yf
-import pandas as pd
-import ta
-import requests
+import asyncio
+import random
+import os
 from datetime import datetime
 import pytz
-import time
-import threading
-import os
-import random
-from flask import Flask
+import yfinance as yf
+import ta
 
-# === Config ===
+from flask import Flask
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    ContextTypes
+)
+
+# === CONFIG ===
+BOT_TOKEN = "8405596682:AAHFDmGX_4hfk5_qIXudfJXC2wK9EpdtnxQ"          # <-- вставь свой токен
+CHANNEL_ID = -1002902970702       # <-- вставь ID канала (-100...)
+TIMEZONE = "America/Sao_Paulo"
+
 PAIRS = {
     "EUR/USD": "EURUSD=X",
     "GBP/USD": "GBPUSD=X",
-    "USD/JPY": "JPY=X"
+    "USD/JPY": "JPY=X",
+    "AUD/USD": "AUDUSD=X",
+    "USD/CAD": "CAD=X"
 }
 
-INTERVAL = '1m'
-LOOKBACK = 50
-RSI_PERIOD = 14
-EMA_FAST = 5
-EMA_SLOW = 20
-BOT_TOKEN = '8405596682:AAHFDmGX_4hfk5_qIXudfJXC2wK9EpdtnxQ'   # <-- замени на свой
-CHAT_ID = '-1002902970702'        # <-- замени на свой
-TIMEZONE = 'America/Sao_Paulo'
+# Хранилище
+user_pairs = set()       # выбранные пары
+bot_running = False      # флаг запуска
 
-# === Telegram ===
-def send_telegram_signal(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': CHAT_ID, 'text': message}
+
+# === SIGNAL LOGIC ===
+def get_signal(pair_name, pair_code):
     try:
-        r = requests.post(url, data=payload)
-        if r.status_code == 200:
-            print("✅ Signal sent to Telegram!")
-        else:
-            print(f"❌ Telegram error {r.status_code}: {r.text}")
+        data = yf.download(pair_code, interval="1m", period="1d", auto_adjust=False, progress=False)
+        if len(data) < 20:
+            return None
+
+        df = data.tail(50).copy()
+        df["ema_fast"] = ta.trend.EMAIndicator(df["Close"], 5).ema_indicator()
+        df["ema_slow"] = ta.trend.EMAIndicator(df["Close"], 20).ema_indicator()
+        df["rsi"] = ta.momentum.RSIIndicator(df["Close"], 14).rsi()
+
+        last = df.iloc[-1]
+        direction = "BUY" if last["ema_fast"] > last["ema_slow"] else "SELL"
+
+        now = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S")
+        return (
+            f"✨ {direction} SIGNAL - {pair_name}\n"
+            f"Time: {now}\n"
+            f"RSI: {last['rsi']:.2f}\n"
+            f"EMA: {'Bullish' if direction == 'BUY' else 'Bearish'}"
+        )
     except Exception as e:
-        print("⚠️ Error sending message:", e)
+        print("Ошибка при получении сигнала:", e)
+        return None
 
-# === Signal Logic ===
-def check_signal(pair_name, pair_code):
-    data = yf.download(pair_code, interval=INTERVAL, period='1d', auto_adjust=False)
-    if len(data) < EMA_SLOW:
-        print(f"Not enough data for {pair_name}")
-        return
 
-    df = data.tail(LOOKBACK).copy()
-    df['rsi'] = ta.momentum.RSIIndicator(df['Close'], RSI_PERIOD).rsi()
-    df['ema_fast'] = ta.trend.EMAIndicator(df['Close'], EMA_FAST).ema_indicator()
-    df['ema_slow'] = ta.trend.EMAIndicator(df['Close'], EMA_SLOW).ema_indicator()
-    macd = ta.trend.MACD(df['Close'])
-    df['macd'] = macd.macd()
-    df['macd_signal'] = macd.macd_signal()
+async def signal_loop(application):
+    global bot_running
+    while bot_running:
+        if user_pairs:
+            for pair_name in list(user_pairs):
+                pair_code = PAIRS[pair_name]
+                signal = get_signal(pair_name, pair_code)
+                if signal:
+                    await application.bot.send_message(chat_id=CHANNEL_ID, text=signal)
 
-    last = df.iloc[-1]
+        delay = random.randint(120, 180)  # 2–3 минуты
+        await asyncio.sleep(delay)
 
-    # Простая логика: направление по EMA
-    direction = "BUY" if last['ema_fast'] > last['ema_slow'] else "SELL"
 
-    send_signal(pair_name, direction, last)
+# === TELEGRAM HANDLERS ===
+def build_menu():
+    keyboard = [
+        [InlineKeyboardButton(p, callback_data=f"pair_{p}")] for p in PAIRS.keys()
+    ]
+    keyboard.append([InlineKeyboardButton("📋 Мои пары", callback_data="my_pairs")])
+    keyboard.append([InlineKeyboardButton("▶️ Запустить сигналы", callback_data="start_bot")])
+    keyboard.append([InlineKeyboardButton("⏹ Остановить сигналы", callback_data="stop_bot")])
+    return InlineKeyboardMarkup(keyboard)
 
-def send_signal(pair_name, direction, data):
-    now = datetime.now(pytz.timezone(TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-    msg = (
-        f"✨ {direction} SIGNAL - {pair_name}\n"
-        f"Time: {now} (UTC-3)\n"
-        f"RSI: {data['rsi']:.2f}\n"
-        f"EMA: {'Bullish' if direction == 'BUY' else 'Bearish'}\n"
-        f"MACD: {data['macd']:.4f} vs {data['macd_signal']:.4f}"
-    )
-    send_telegram_signal(msg)
 
-# === Bot Loop ===
-def run_bot():
-    print("\n📡 Multi-pair signal bot started (2–3 min mode)...")
-    while True:
-        try:
-            for pair_name, pair_code in PAIRS.items():
-                check_signal(pair_name, pair_code)
-        except Exception as err:
-            print("⚠️ Error in loop:", err)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Привет! Управляй ботом через кнопки ниже:", reply_markup=build_menu())
 
-        # Случайный интервал 2–3 минуты
-        delay = random.randint(120, 180)
-        print(f"⏳ Waiting {delay} seconds before next cycle...\n")
-        time.sleep(delay)
 
-# === Flask Stub ===
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global bot_running
+    query = update.callback_query
+    await query.answer()
+
+    if query.data.startswith("pair_"):
+        pair = query.data.replace("pair_", "")
+        if pair in user_pairs:
+            user_pairs.remove(pair)
+            await query.message.reply_text(f"❌ {pair} убран.\nТекущие пары: {', '.join(user_pairs) or 'нет'}", reply_markup=build_menu())
+        else:
+            user_pairs.add(pair)
+            await query.message.reply_text(f"✅ {pair} добавлен.\nТекущие пары: {', '.join(user_pairs)}", reply_markup=build_menu())
+
+    elif query.data == "my_pairs":
+        pairs_list = ", ".join(user_pairs) if user_pairs else "нет"
+        await query.message.reply_text(f"📋 Текущие пары: {pairs_list}", reply_markup=build_menu())
+
+    elif query.data == "start_bot":
+        if not user_pairs:
+            await query.message.reply_text("⚠️ Сначала выбери хотя бы одну валютную пару!", reply_markup=build_menu())
+            return
+        if not bot_running:
+            bot_running = True
+            asyncio.create_task(signal_loop(context.application))
+            await query.message.reply_text("🚀 Сигналы запущены! (каждые 2–3 минуты в канал)", reply_markup=build_menu())
+        else:
+            await query.message.reply_text("⚡ Сигналы уже идут.", reply_markup=build_menu())
+
+    elif query.data == "stop_bot":
+        if bot_running:
+            bot_running = False
+            await query.message.reply_text("⏹ Сигналы остановлены.", reply_markup=build_menu())
+        else:
+            await query.message.reply_text("⏸ Бот и так остановлен.", reply_markup=build_menu())
+
+
+# === FLASK STUB ===
 app = Flask(__name__)
-
 @app.route("/")
 def index():
-    return "✅ Multi-pair Bot is running!"
+    return "✅ Bot is running with buttons (channel mode)!"
+
+
+# === MAIN ===
+def main():
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button))
+
+    # Flask + Telegram бот параллельно
+    import threading
+    threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))),
+        daemon=True
+    ).start()
+
+    print("📡 Bot started with channel output!")
+    application.run_polling()
+
 
 if __name__ == "__main__":
-    send_telegram_signal("🚀 Multi-pair bot started! Signals every 2–3 minutes.")
-
-    t = threading.Thread(target=run_bot, daemon=True)
-    t.start()
-
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    main()
