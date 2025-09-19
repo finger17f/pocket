@@ -22,7 +22,9 @@ import ta
 try:
     import imghdr
 except ImportError:
-    import imghdr_py as imghdr
+    # Python 3.13+: модуль удалён, подменяем минимальной заглушкой
+    import types
+    imghdr = types.SimpleNamespace(what=lambda *a, **k: None)
 # -----------------------------------
 
 from flask import Flask
