@@ -5,23 +5,17 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 import ta
+
 from flask import Flask
-
-# Фикс отсутствующего imghdr в Python 3.13
-try:
-    import imghdr
-except ImportError:
-    import types
-    imghdr = types.SimpleNamespace(what=lambda *a, **k: None)
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, ContextTypes
+    Application, CommandHandler, CallbackQueryHandler,
+    ContextTypes
 )
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("BOT_TOKEN", "ТОКЕН_БОТА")   # токен бота
-CHANNEL_ID = os.getenv("CHANNEL_ID", "-1002902970702")  # id канала
+BOT_TOKEN = "ТОКЕН_БОТА"  # вставь сюда свой токен
+CHANNEL_ID = -1002902970702  # ID канала
 TIMEZONE = "America/Sao_Paulo"
 
 PAIRS = {
@@ -32,13 +26,15 @@ PAIRS = {
     "USD/CAD": "CAD=X"
 }
 
-user_pairs = set()
-bot_running = False
+# Хранилище
+user_pairs = set()       # выбранные пары
+bot_running = False      # флаг запуска
+
 
 # === SIGNAL LOGIC ===
 def get_signal(pair_name, pair_code):
     try:
-        data = yf.download(pair_code, interval="1m", period="1d", progress=False)
+        data = yf.download(pair_code, interval="1m", period="1d", auto_adjust=False, progress=False)
         if len(data) < 20:
             return None
 
@@ -49,17 +45,18 @@ def get_signal(pair_name, pair_code):
 
         last = df.iloc[-1]
         direction = "BUY" if last["ema_fast"] > last["ema_slow"] else "SELL"
-        now = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S")
 
+        now = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S")
         return (
             f"✨ {direction} SIGNAL - {pair_name}\n"
-            f"⏰ {now}\n"
-            f"📊 RSI: {last['rsi']:.2f}\n"
-            f"📈 EMA: {'Bullish' if direction == 'BUY' else 'Bearish'}"
+            f"Time: {now}\n"
+            f"RSI: {last['rsi']:.2f}\n"
+            f"EMA: {'Bullish' if direction == 'BUY' else 'Bearish'}"
         )
     except Exception as e:
         print("Ошибка при получении сигнала:", e)
         return None
+
 
 async def signal_loop(application):
     global bot_running
@@ -74,6 +71,7 @@ async def signal_loop(application):
         delay = random.randint(120, 180)  # 2–3 минуты
         await asyncio.sleep(delay)
 
+
 # === TELEGRAM HANDLERS ===
 def build_menu():
     keyboard = [
@@ -84,8 +82,10 @@ def build_menu():
     keyboard.append([InlineKeyboardButton("⏹ Остановить сигналы", callback_data="stop_bot")])
     return InlineKeyboardMarkup(keyboard)
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет! Управляй ботом через кнопки ниже:", reply_markup=build_menu())
+
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global bot_running
@@ -123,18 +123,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.message.reply_text("⏸ Бот и так остановлен.", reply_markup=build_menu())
 
+
 # === FLASK STUB ===
 app = Flask(__name__)
 @app.route("/")
 def index():
     return "✅ Bot is running with buttons!"
 
+
 # === MAIN ===
-def main():
+async def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button))
 
+    # Flask + Telegram бот параллельно
     import threading
     threading.Thread(
         target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))),
@@ -142,8 +145,8 @@ def main():
     ).start()
 
     print("📡 Bot started with full menu!")
-    application.run_polling()
+    await application.run_polling()
+
 
 if __name__ == "__main__":
-    main()
-
+    asyncio.run(main())
