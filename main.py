@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 # === CONFIG ===
-BOT_TOKEN = "ТОКЕН_БОТА"  # вставь сюда свой токен
+BOT_TOKEN = "8405596682:AAHFDmGX_4hfk5_qIXudfJXC2wK9EpdtnxQ"  # вставь сюда свой токен
 CHANNEL_ID = -1002902970702  # ID канала
 TIMEZONE = "America/Sao_Paulo"
 
@@ -147,6 +147,7 @@ async def main():
     print("📡 Bot started with full menu!")
     await application.run_polling()
 
+import asyncio
 
 if __name__ == "__main__":
     asyncio.run(main())
